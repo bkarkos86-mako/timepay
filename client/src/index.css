@@ -91,7 +91,7 @@ button, input, select, textarea {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0.75rem 1.25rem;
+  padding: calc(0.75rem + env(safe-area-inset-top)) 1.25rem 0.75rem;
   border-bottom: 1px solid var(--border);
   background: var(--bg-elevated);
   position: sticky;
@@ -163,6 +163,11 @@ main.content {
   .grid-cols-2, .grid-cols-3, .grid-cols-4 { grid-template-columns: 1fr; }
   .topbar { flex-wrap: wrap; gap: 0.5rem; }
   main.content { padding: 0.85rem; }
+  /* Clock In is the one thing an employee needs the instant the page loads —
+     don't make them scroll past the hours stat cards to reach it. */
+  .clock-stats-wrap { display: flex; flex-direction: column; }
+  .clock-stats-wrap > :nth-child(1) { order: 2; }
+  .clock-stats-wrap > :nth-child(2) { order: 1; }
 }
 
 .card {
@@ -374,6 +379,9 @@ video.camera-preview, canvas.camera-preview {
 .cal-day {
   background: var(--bg-elevated);
   min-height: 92px;
+  min-width: 0; /* grid items default to min-width:auto, which lets the chip's
+    nowrap text force each column wide — this lets it shrink so the chip's own
+    ellipsis/overflow rules can actually kick in instead */
   padding: 0.35rem;
   cursor: pointer;
   display: flex;

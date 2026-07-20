@@ -33,6 +33,16 @@ app.use('/api/auth/webauthn', webauthnRouter);
 app.use('/api/worksites', worksitesRouter);
 app.use('/api/push', pushRouter);
 
+// Production: one Render web service serves both the API and the built
+// React app (same origin — no CORS/base-URL config needed on the client).
+// In local dev this directory doesn't exist, so both lines are silent
+// no-ops and Vite's own dev server keeps handling the client as usual.
+const clientDist = path.join(process.cwd(), '../client/dist');
+app.use(express.static(clientDist));
+app.get(/^(?!\/api).*/, (req, res, next) => {
+  res.sendFile(path.join(clientDist, 'index.html'), (err) => err && next(err));
+});
+
 app.use((err, req, res, next) => {
   console.error(err);
   res.status(500).json({ error: err.message || 'Internal server error' });

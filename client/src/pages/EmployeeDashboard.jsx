@@ -224,6 +224,7 @@ export default function EmployeeDashboard() {
         </div>
       )}
 
+      <div className="clock-stats-wrap">
       <div className="grid grid-cols-3 section">
         <div className="card">
           <div className="stat-label">Regular hours ({summary?.isOpenPeriod ? 'this pay period' : 'this week'})</div>
@@ -311,6 +312,7 @@ export default function EmployeeDashboard() {
             </tbody>
           </table>
         </div>
+      </div>
       </div>
 
       <div className="card section">

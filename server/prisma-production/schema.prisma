@@ -1,0 +1,483 @@
+// PRODUCTION schema — points at a real Postgres database (e.g. Neon free
+// tier) instead of the local SQLite file used in server/prisma/schema.prisma.
+// This file exists because Prisma can't switch datasource provider at
+// runtime from one schema, and local dev intentionally stays on SQLite
+// (zero-config, no external dependency, free). The two schemas are
+// deliberately kept model-for-model identical — the models below avoid any
+// SQLite/Postgres-incompatible features (e.g. no native enums) on purpose so
+// this stays a copy-paste sync, not a rewrite.
+//
+// IMPORTANT: if you change server/prisma/schema.prisma, mirror the same
+// model changes here, then regenerate a migration with:
+//   npx prisma migrate dev --name <name> --schema=./prisma-production/schema.prisma
+// (run against a real Postgres DATABASE_URL, e.g. a Neon branch).
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------- Employees & roles ----------
+
+model Employee {
+  id               String   @id @default(cuid())
+  firstName        String
+  lastName         String
+  email            String   @unique
+  passwordHash     String
+  systemRole       String   @default("EMPLOYEE") // EMPLOYEE | MANAGER | ADMIN
+  employmentStatus String   @default("ACTIVE") // ACTIVE | INACTIVE | TERMINATED
+  hireDate         DateTime @default(now())
+  // Philippine labor law: probationary employees become regular after 6
+  // months of continuous service (Labor Code Art. 296). Auto-set to
+  // hireDate + 6 months when the employee is created; kept editable since
+  // real cases (leave without pay, early regularization, etc.) can shift it.
+  regularizationDate DateTime?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  jobRoles      EmployeeJobRole[]
+  timeEntries   TimeEntry[]        @relation("EmployeeTimeEntries")
+  approvedEntries TimeEntry[]      @relation("ApprovedByManager")
+  shifts        Shift[]
+  leaveBalances LeaveBalance[]
+  leaveRequests LeaveRequest[]     @relation("EmployeeLeaveRequests")
+  decidedLeaveRequests LeaveRequest[] @relation("ApproverLeaveRequests")
+  auditLogs     AuditLog[]         @relation("ChangedByEmployee")
+  passkeys      Passkey[]
+  locationPings LocationPing[]
+  geofenceIncidents         GeofenceIncident[] @relation("IncidentEmployee")
+  resolvedGeofenceIncidents GeofenceIncident[] @relation("IncidentResolvedBy")
+  pushSubscriptions PushSubscription[]
+  pingChallenges PingChallenge[]
+  performanceReviews         PerformanceReview[] @relation("ReviewSubject")
+  performanceReviewsGiven    PerformanceReview[] @relation("ReviewedBy")
+  shiftChangeRequests         ShiftChangeRequest[] @relation("ShiftChangeEmployee")
+  decidedShiftChangeRequests  ShiftChangeRequest[] @relation("ShiftChangeApprover")
+
+  @@map("employees")
+}
+
+model PerformanceReview {
+  id           String   @id @default(cuid())
+  employeeId   String
+  reviewedById String
+  reviewDate   DateTime @default(now())
+  rating       String // EXCEEDS_EXPECTATIONS | MEETS_EXPECTATIONS | NEEDS_IMPROVEMENT | UNSATISFACTORY
+  notes        String
+  createdAt    DateTime @default(now())
+
+  employee   Employee @relation("ReviewSubject", fields: [employeeId], references: [id], onDelete: Cascade)
+  reviewedBy Employee @relation("ReviewedBy", fields: [reviewedById], references: [id])
+
+  @@index([employeeId])
+  @@map("performance_reviews")
+}
+
+// WebAuthn/passkey credentials, enrolled per-device, used as a faster
+// biometric (Face ID / fingerprint / Windows Hello) alternative to password
+// login. Password login always remains available — this is additive, not a
+// replacement, and a credential only works on the device it was enrolled on.
+model Passkey {
+  id           String    @id @default(cuid())
+  employeeId   String
+  credentialId String    @unique // base64url WebAuthn credential ID
+  publicKey    String // base64url-encoded COSE public key
+  counter      Int       @default(0)
+  deviceType   String? // 'singleDevice' | 'multiDevice'
+  backedUp     Boolean   @default(false)
+  transports   String? // comma-separated AuthenticatorTransport values
+  nickname     String? // e.g. "Ella's iPhone"
+  createdAt    DateTime  @default(now())
+  lastUsedAt   DateTime?
+
+  employee Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  @@map("passkeys")
+}
+
+// An employee can hold multiple job roles, each with its own hourly rate
+// (e.g. "Cashier" at 60/hr, "Shift Lead" at 75/hr).
+model EmployeeJobRole {
+  id         String  @id @default(cuid())
+  employeeId String
+  roleName   String
+  hourlyRate Float
+  isDefault  Boolean @default(false)
+
+  employee Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  @@index([employeeId])
+  @@map("employee_job_roles")
+}
+
+// Configurable worksite locations for geofencing. Optional/opt-in: if none
+// exist, clock in/out never gets flagged for location. If one or more do,
+// every clock in/out is checked against the nearest one.
+model Worksite {
+  id           String  @id @default(cuid())
+  name         String
+  lat          Float
+  lng          Float
+  radiusMeters Float   @default(150)
+  isActive     Boolean @default(true)
+
+  @@map("worksites")
+}
+
+// ---------- Scheduling ----------
+
+model Shift {
+  id             String   @id @default(cuid())
+  employeeId     String
+  roleName       String // which job role this shift is worked under (pay rate lookup)
+  date           DateTime // shift calendar date
+  scheduledStart DateTime
+  scheduledEnd   DateTime
+  breakMinutes   Int      @default(0)
+  isRestDay      Boolean  @default(false) // scheduling someone on their designated day off triggers rest-day premium
+  notes          String?
+  createdAt      DateTime @default(now())
+
+  employee   Employee    @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  timeEntries TimeEntry[]
+  changeRequests ShiftChangeRequest[]
+
+  @@index([employeeId, date])
+  @@map("shifts")
+}
+
+// An employee flagging a date and asking for their schedule to change —
+// doesn't auto-modify anything, mirrors LeaveRequest's review workflow: the
+// employee explains what they need, a manager reviews and manually adjusts
+// the shift (or not) via the normal scheduling tools, then resolves this.
+model ShiftChangeRequest {
+  id           String    @id @default(cuid())
+  employeeId   String
+  shiftId      String? // the specific shift being referenced, if one exists that day
+  date         DateTime // calendar date in question
+  reason       String
+  status       String    @default("PENDING") // PENDING | APPROVED | DENIED
+  approverId   String?
+  decidedAt    DateTime?
+  decisionNote String?
+  createdAt    DateTime  @default(now())
+
+  employee Employee  @relation("ShiftChangeEmployee", fields: [employeeId], references: [id], onDelete: Cascade)
+  approver Employee? @relation("ShiftChangeApprover", fields: [approverId], references: [id])
+  shift    Shift?    @relation(fields: [shiftId], references: [id], onDelete: SetNull)
+
+  @@index([employeeId, date])
+  @@map("shift_change_requests")
+}
+
+// ---------- Time entries ----------
+
+model TimeEntry {
+  id         String  @id @default(cuid())
+  employeeId String
+  shiftId    String?
+  roleName   String // job role worked, for multi-rate wage calc
+
+  type   String @default("CLOCK") // CLOCK | MANUAL
+  status String @default("APPROVED") // PENDING | APPROVED | REJECTED (manual entries start PENDING)
+
+  clockIn         DateTime
+  clockInPhotoUrl String?
+  clockInLat      Float?
+  clockInLng      Float?
+
+  clockOut         DateTime?
+  clockOutPhotoUrl String?
+  clockOutLat      Float?
+  clockOutLng      Float?
+
+  reason String? // required for MANUAL entries
+
+  isLate          Boolean @default(false)
+  lateMinutes     Int     @default(0)
+  // A stricter subset of isLate (15+ min vs the 5-min grace period) — this is
+  // the threshold that counts as a formal tardy occurrence for performance
+  // review purposes, not just day-to-day lateness tracking.
+  isTardy         Boolean @default(false)
+  isUndertime     Boolean @default(false)
+  undertimeMinutes Int    @default(0)
+
+  // Distance (meters) to the nearest active Worksite at the time of the
+  // punch, and whether that exceeded the worksite's radius. Null when no
+  // worksites are configured (geofencing is opt-in) or no coords were sent.
+  clockInDistanceMeters   Float?
+  clockInOutsideGeofence  Boolean @default(false)
+  clockOutDistanceMeters  Float?
+  clockOutOutsideGeofence Boolean @default(false)
+
+  approvedById String?
+  approvedAt   DateTime?
+
+  // Corrections never overwrite — they create a new TimeEntry that points
+  // back at the one it supersedes, and the original is left untouched.
+  correctionOfId String?     @unique
+  correctionOf   TimeEntry?  @relation("EntryCorrection", fields: [correctionOfId], references: [id])
+  correctedBy    TimeEntry?  @relation("EntryCorrection")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  employee   Employee @relation("EmployeeTimeEntries", fields: [employeeId], references: [id], onDelete: Cascade)
+  approvedBy Employee? @relation("ApprovedByManager", fields: [approvedById], references: [id])
+  shift      Shift?    @relation(fields: [shiftId], references: [id])
+  breaks     BreakEntry[]
+  locationPings     LocationPing[]
+  geofenceIncidents GeofenceIncident[]
+  pingChallenges    PingChallenge[]
+
+  @@index([employeeId, clockIn])
+  @@map("time_entries")
+}
+
+// Raw log of periodic location checks while an employee is clocked in
+// (opt-in: only pinged when at least one active Worksite exists). This is
+// the reviewable trail — GeofenceIncident below tracks the derived
+// "currently outside the area" state machine on top of it.
+model LocationPing {
+  id              String   @id @default(cuid())
+  timeEntryId     String
+  employeeId      String
+  lat             Float
+  lng             Float
+  distanceMeters  Float?
+  outsideGeofence Boolean  @default(false)
+  recordedAt      DateTime @default(now())
+
+  timeEntry TimeEntry @relation(fields: [timeEntryId], references: [id], onDelete: Cascade)
+  employee  Employee  @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  @@index([timeEntryId, recordedAt])
+  @@map("location_pings")
+}
+
+// Opens the moment a clocked-in employee's location ping first lands outside
+// every active worksite's geofence; closes when they either ping back inside
+// (RETURNED), submit a photo proving they're still there (PHOTO_VERIFIED),
+// or a manager force-clocks them out (FORCED_CLOCK_OUT). Never overwritten —
+// stays on record either way, for review.
+model GeofenceIncident {
+  id                    String    @id @default(cuid())
+  timeEntryId           String
+  employeeId            String
+  startedAt             DateTime  @default(now())
+  resolvedAt            DateTime?
+  resolution            String? // RETURNED | PHOTO_VERIFIED | FORCED_CLOCK_OUT
+  resolvedById          String?
+  verificationPhotoUrl  String?
+  lastLat               Float?
+  lastLng               Float?
+  lastDistanceMeters    Float?
+
+  timeEntry  TimeEntry @relation(fields: [timeEntryId], references: [id], onDelete: Cascade)
+  employee   Employee  @relation("IncidentEmployee", fields: [employeeId], references: [id], onDelete: Cascade)
+  resolvedBy Employee? @relation("IncidentResolvedBy", fields: [resolvedById], references: [id])
+
+  @@index([timeEntryId])
+  @@map("geofence_incidents")
+}
+
+// A covert, unobtrusive location spot-check: the server randomly pushes a
+// generically-worded notification to a clocked-in employee; tapping it
+// silently reports their location with no visible "you've been checked" UI.
+// This exists because a continuous client-side ping loop dies the instant a
+// phone screen locks (JS gets suspended) — push notifications are the one
+// thing that still wakes a backgrounded/closed browser, so this is the
+// mechanism that actually works when the app isn't open. Never auto-punishes
+// a non-response — a MISSED challenge just sits in the review list.
+//
+// The whole day's count (3-6) is committed and scheduled at random times up
+// front, the moment a shift becomes eligible — not rolled independently each
+// sweep — so an employee can't learn "I usually get pinged twice a day" from
+// experience; the count itself varies, not just the timing.
+model PingChallenge {
+  id              String    @id @default(cuid())
+  timeEntryId     String
+  employeeId      String
+  scheduledAt     DateTime  @default(now()) // when this challenge is planned to fire
+  sentAt          DateTime? // when the push was actually sent (null until dispatched)
+  respondedAt     DateTime?
+  lat             Float?
+  lng             Float?
+  distanceMeters  Float?
+  outsideGeofence Boolean?
+  status          String    @default("SCHEDULED") // SCHEDULED | PENDING | RESPONDED | MISSED | CANCELLED
+
+  timeEntry TimeEntry @relation(fields: [timeEntryId], references: [id], onDelete: Cascade)
+  employee  Employee  @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  @@index([timeEntryId])
+  @@index([status])
+  @@map("ping_challenges")
+}
+
+// One row per browser/device an employee or manager has opted into push
+// notifications on (Web Push standard — no third-party service, delivered
+// via the browser's own push service).
+model PushSubscription {
+  id         String   @id @default(cuid())
+  employeeId String
+  endpoint   String   @unique
+  p256dh     String
+  auth       String
+  createdAt  DateTime @default(now())
+
+  employee Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  @@map("push_subscriptions")
+}
+
+model BreakEntry {
+  id          String    @id @default(cuid())
+  timeEntryId String
+  type        String    @default("BREAK") // BREAK | LUNCH
+  breakStart  DateTime
+  breakEnd    DateTime?
+
+  timeEntry TimeEntry @relation(fields: [timeEntryId], references: [id], onDelete: Cascade)
+
+  @@index([timeEntryId])
+  @@map("break_entries")
+}
+
+// ---------- Leave management ----------
+
+model LeaveType {
+  id                 String  @id @default(cuid())
+  name               String  @unique // Sick Leave, Vacation Leave, Emergency Leave, ...
+  accrualPerMonth    Float   @default(0) // hours accrued per month worked
+  maxBalance         Float? // optional cap
+  requiresApproval   Boolean @default(true)
+
+  leaveBalances LeaveBalance[]
+  leaveRequests LeaveRequest[]
+
+  @@map("leave_types")
+}
+
+model LeaveBalance {
+  id              String   @id @default(cuid())
+  employeeId      String
+  leaveTypeId     String
+  balanceHours    Float    @default(0)
+  lastAccrualDate DateTime?
+
+  employee  Employee  @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  leaveType LeaveType @relation(fields: [leaveTypeId], references: [id], onDelete: Cascade)
+
+  @@unique([employeeId, leaveTypeId])
+  @@map("leave_balances")
+}
+
+model LeaveRequest {
+  id          String    @id @default(cuid())
+  employeeId  String
+  leaveTypeId String
+  startDate   DateTime
+  endDate     DateTime
+  hoursTotal  Float
+  reason      String
+  status      String    @default("PENDING") // PENDING | APPROVED | DENIED | CANCELLED
+  approverId  String?
+  decidedAt   DateTime?
+  decisionNote String?
+  createdAt   DateTime  @default(now())
+
+  employee  Employee   @relation("EmployeeLeaveRequests", fields: [employeeId], references: [id], onDelete: Cascade)
+  approver  Employee?  @relation("ApproverLeaveRequests", fields: [approverId], references: [id])
+  leaveType LeaveType  @relation(fields: [leaveTypeId], references: [id])
+
+  @@index([employeeId, startDate])
+  @@map("leave_requests")
+}
+
+// Optional staffing guardrails: if more than maxConcurrentLeave employees
+// are on leave the same day, new requests get flagged (not blocked).
+model StaffingRule {
+  id                 String @id @default(cuid())
+  name               String
+  maxConcurrentLeave Int
+  blackoutStart      DateTime?
+  blackoutEnd        DateTime?
+
+  @@map("staffing_rules")
+}
+
+// ---------- Pay configuration & periods ----------
+
+model PayPeriod {
+  id         String    @id @default(cuid())
+  startDate  DateTime
+  endDate    DateTime
+  status     String    @default("OPEN") // OPEN | CLOSED | EXPORTED
+  closedAt   DateTime?
+  exportedAt DateTime?
+
+  @@map("pay_periods")
+}
+
+model Holiday {
+  id                String  @id @default(cuid())
+  date              DateTime
+  name              String
+  type              String // REGULAR | SPECIAL_NON_WORKING
+  multiplierOverride Float?
+
+  @@map("holidays")
+}
+
+// Singleton-ish table of configurable pay rule thresholds (OT, night diff, multipliers).
+model PayRuleConfig {
+  id                       String @id @default("default")
+  otDailyThresholdHours    Float  @default(8)
+  otMultiplier             Float  @default(1.25)
+  nightDiffStartHour       Int    @default(22) // 10pm
+  nightDiffEndHour         Int    @default(6)  // 6am
+  nightDiffMultiplier      Float  @default(1.10)
+  regularHolidayMultiplier Float  @default(2.0)
+  specialHolidayMultiplier Float  @default(1.30)
+  restDayMultiplier        Float  @default(1.30)
+
+  @@map("pay_rule_config")
+}
+
+// Reference-only gov't contribution brackets — computed and shown separately
+// from the core hours/wage engine, never mixed into gross pay logic.
+model GovContributionBracket {
+  id                    String @id @default(cuid())
+  type                  String // SSS | PHILHEALTH | PAGIBIG
+  minSalary             Float
+  maxSalary             Float?
+  employeeContribution  Float
+  employerContribution  Float
+
+  @@map("gov_contribution_brackets")
+}
+
+// ---------- Audit ----------
+
+model AuditLog {
+  id                String   @id @default(cuid())
+  entityType        String // TimeEntry | LeaveBalance | LeaveRequest | Employee | ...
+  entityId          String
+  changedById       String
+  changeDescription String
+  reason            String?
+  oldValue          String? // JSON string
+  newValue          String? // JSON string
+  timestamp         DateTime @default(now())
+
+  changedBy Employee @relation("ChangedByEmployee", fields: [changedById], references: [id])
+
+  @@index([entityType, entityId])
+  @@map("audit_log")
+}

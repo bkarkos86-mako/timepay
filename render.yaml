@@ -1,0 +1,49 @@
+# Render Blueprint — deploys TimePay as a single free web service that
+# serves both the API and the built React client (same origin, so the
+# client's relative /api calls just work with no base-URL config).
+#
+# Deploy: Render dashboard -> New -> Blueprint -> connect this repo.
+# You'll be prompted to fill in every env var below marked sync:false —
+# see server/.env.example for what each one means. DATABASE_URL should be a
+# Postgres connection string (e.g. from Neon's free tier), not the local
+# SQLite file used in dev.
+#
+# The build step uses `prisma db push` (not `migrate deploy`) against
+# server/prisma-production/schema.prisma — this lets the very first deploy
+# create the schema without needing a pre-generated migration history, and
+# every later deploy re-syncs the schema to match. Tradeoff: a future schema
+# change that removes/narrows a column would apply that change automatically
+# on deploy (--accept-data-loss is required for db push to run unattended in
+# CI) — fine for a small solo-maintained app, but worth knowing.
+services:
+  - type: web
+    name: timepay
+    runtime: node
+    plan: free
+    rootDir: server
+    buildCommand: >
+      npm ci &&
+      npx prisma generate --schema=./prisma-production/schema.prisma &&
+      npx prisma db push --schema=./prisma-production/schema.prisma --accept-data-loss &&
+      cd ../client && npm ci && npm run build
+    startCommand: npm start
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        sync: false
+      - key: JWT_SECRET
+        sync: false
+      - key: WEBAUTHN_RP_NAME
+        value: TimePay
+      - key: WEBAUTHN_RP_ID
+        sync: false
+      - key: WEBAUTHN_ORIGIN
+        sync: false
+      - key: VAPID_PUBLIC_KEY
+        sync: false
+      - key: VAPID_PRIVATE_KEY
+        sync: false
+      - key: VAPID_SUBJECT
+        sync: false
