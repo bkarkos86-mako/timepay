@@ -24,11 +24,15 @@ services:
     runtime: node
     plan: free
     rootDir: server
+    # --include=dev on both npm ci calls: NODE_ENV=production below makes npm
+    # skip devDependencies by default, which silently breaks this build
+    # ("vite: not found") since vite/prisma are both devDependencies, only
+    # needed at build time. Runtime behavior is unaffected either way.
     buildCommand: >
-      npm ci &&
+      npm ci --include=dev &&
       npx prisma generate --schema=./prisma-production/schema.prisma &&
       npx prisma db push --schema=./prisma-production/schema.prisma --accept-data-loss &&
-      cd ../client && npm ci && npm run build
+      cd ../client && npm ci --include=dev && npm run build
     startCommand: npm start
     healthCheckPath: /api/health
     envVars:
