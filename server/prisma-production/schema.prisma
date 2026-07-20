@@ -103,11 +103,15 @@ model Passkey {
 // An employee can hold multiple job roles, each with its own hourly rate
 // (e.g. "Cashier" at 60/hr, "Shift Lead" at 75/hr).
 model EmployeeJobRole {
-  id         String  @id @default(cuid())
-  employeeId String
-  roleName   String
-  hourlyRate Float
-  isDefault  Boolean @default(false)
+  id             String  @id @default(cuid())
+  employeeId     String
+  roleName       String
+  hourlyRate     Float
+  // Flat per-day amount (e.g. meal/transport allowance), earned once per
+  // calendar day the employee has at least one approved worked entry under
+  // this role — tracked separately from wages, never folded into gross pay.
+  dailyAllowance Float   @default(0)
+  isDefault      Boolean @default(false)
 
   employee Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
 

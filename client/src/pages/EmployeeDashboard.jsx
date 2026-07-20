@@ -225,7 +225,7 @@ export default function EmployeeDashboard() {
       )}
 
       <div className="clock-stats-wrap">
-      <div className="grid grid-cols-3 section">
+      <div className="grid grid-cols-4 section">
         <div className="card">
           <div className="stat-label">Regular hours ({summary?.isOpenPeriod ? 'this pay period' : 'this week'})</div>
           <div className="stat-value">{summary ? summary.regularHours.toFixed(1) : '—'}</div>
@@ -237,6 +237,10 @@ export default function EmployeeDashboard() {
         <div className="card">
           <div className="stat-label">Estimated gross pay</div>
           <div className="stat-value">₱{summary ? summary.grossPay.toFixed(2) : '—'}</div>
+        </div>
+        <div className="card">
+          <div className="stat-label">Allowance{summary ? ` (${summary.allowanceDays}d)` : ''}</div>
+          <div className="stat-value">₱{summary ? summary.allowancePay.toFixed(2) : '—'}</div>
         </div>
       </div>
 

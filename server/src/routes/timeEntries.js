@@ -5,6 +5,7 @@ import { uploadPhoto } from '../middleware/upload.js';
 import { logAudit } from '../lib/audit.js';
 import { checkGeofence, recordGeofenceCheck } from '../lib/geofenceIncidents.js';
 import { savePhoto } from '../lib/storage.js';
+import { endOfDayUTC } from '../lib/dateRange.js';
 
 export const timeEntriesRouter = Router();
 timeEntriesRouter.use(requireAuth);
@@ -373,7 +374,7 @@ timeEntriesRouter.get('/', async (req, res) => {
   if (from || to) {
     where.clockIn = {};
     if (from) where.clockIn.gte = new Date(from);
-    if (to) where.clockIn.lte = new Date(to);
+    if (to) where.clockIn.lte = endOfDayUTC(to);
   }
 
   const entries = await prisma.timeEntry.findMany({

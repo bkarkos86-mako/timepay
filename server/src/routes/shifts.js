@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { prisma } from '../db.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
 import { logAudit } from '../lib/audit.js';
+import { endOfDayUTC } from '../lib/dateRange.js';
 
 export const shiftsRouter = Router();
 shiftsRouter.use(requireAuth);
@@ -15,7 +16,7 @@ shiftsRouter.get('/', async (req, res) => {
   if (from || to) {
     where.date = {};
     if (from) where.date.gte = new Date(from);
-    if (to) where.date.lte = new Date(to);
+    if (to) where.date.lte = endOfDayUTC(to);
   }
   const shifts = await prisma.shift.findMany({
     where,

@@ -3,6 +3,7 @@ import { prisma } from '../db.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
 import { computeWageBreakdown, compute13thMonthAccrual } from '../lib/wageCalc.js';
 import { computeAllContributions } from '../lib/govContributions.js';
+import { endOfDayUTC } from '../lib/dateRange.js';
 
 export const payrollRouter = Router();
 payrollRouter.use(requireAuth);
@@ -24,20 +25,22 @@ async function loadEnrichedEntries(employeeId, from, to) {
   const [employee, entries, holidays] = await Promise.all([
     prisma.employee.findUnique({ where: { id: employeeId }, include: { jobRoles: true } }),
     prisma.timeEntry.findMany({
-      where: { employeeId, status: 'APPROVED', clockOut: { not: null }, clockIn: { gte: new Date(from), lte: new Date(to) } },
+      where: { employeeId, status: 'APPROVED', clockOut: { not: null }, clockIn: { gte: new Date(from), lte: endOfDayUTC(to) } },
       include: { breaks: true, shift: true },
     }),
-    prisma.holiday.findMany({ where: { date: { gte: new Date(from), lte: new Date(to) } } }),
+    prisma.holiday.findMany({ where: { date: { gte: new Date(from), lte: endOfDayUTC(to) } } }),
   ]);
 
   if (!employee) return null;
 
   const rateByRole = new Map(employee.jobRoles.map((r) => [r.roleName, r.hourlyRate]));
+  const allowanceByRole = new Map(employee.jobRoles.map((r) => [r.roleName, r.dailyAllowance]));
   const holidayByDay = new Map(holidays.map((h) => [dayKey(h.date), h]));
 
   const enriched = entries.map((e) => ({
     ...e,
     hourlyRate: rateByRole.get(e.roleName) ?? 0,
+    dailyAllowance: allowanceByRole.get(e.roleName) ?? 0,
     holiday: holidayByDay.get(dayKey(e.clockIn)) ?? null,
   }));
 

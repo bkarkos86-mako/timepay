@@ -183,6 +183,7 @@ export default function EmployeeProfile() {
                     {r.roleName} {r.isDefault && <span className="badge badge-closed">default</span>}
                   </td>
                   <td>₱{r.hourlyRate}/hr</td>
+                  <td className="muted">{r.dailyAllowance > 0 ? `₱${r.dailyAllowance}/day allowance` : ''}</td>
                 </tr>
               ))}
             </tbody>

@@ -16,7 +16,7 @@ const publicEmployee = (e) => ({
   employmentStatus: e.employmentStatus,
   hireDate: e.hireDate,
   regularizationDate: e.regularizationDate,
-  jobRoles: e.jobRoles?.map((r) => ({ id: r.id, roleName: r.roleName, hourlyRate: r.hourlyRate, isDefault: r.isDefault })),
+  jobRoles: e.jobRoles?.map((r) => ({ id: r.id, roleName: r.roleName, hourlyRate: r.hourlyRate, dailyAllowance: r.dailyAllowance, isDefault: r.isDefault })),
 });
 
 // Philippine Labor Code Art. 296: probationary employees become regular
@@ -68,6 +68,7 @@ employeesRouter.post('/', requireRole('ADMIN'), async (req, res) => {
         create: jobRoles.map((r, i) => ({
           roleName: r.roleName,
           hourlyRate: r.hourlyRate,
+          dailyAllowance: r.dailyAllowance ?? 0,
           isDefault: r.isDefault ?? i === 0,
         })),
       },

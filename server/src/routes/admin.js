@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { prisma } from '../db.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
 import { computeWageBreakdown } from '../lib/wageCalc.js';
+import { endOfDayUTC } from '../lib/dateRange.js';
 
 export const adminRouter = Router();
 adminRouter.use(requireAuth, requireRole('ADMIN', 'MANAGER'));
@@ -156,20 +157,22 @@ adminRouter.get('/export/csv', async (req, res) => {
     include: { jobRoles: true },
   });
   const config = await prisma.payRuleConfig.upsert({ where: { id: 'default' }, update: {}, create: {} });
-  const holidays = await prisma.holiday.findMany({ where: { date: { gte: new Date(from), lte: new Date(to) } } });
+  const holidays = await prisma.holiday.findMany({ where: { date: { gte: new Date(from), lte: endOfDayUTC(to) } } });
   const holidayByDay = new Map(holidays.map((h) => [new Date(h.date).setHours(0, 0, 0, 0), h]));
 
   const rows = [toCsvRow(['Employee', 'Role', 'Date', 'Regular Hrs', 'OT Hrs', 'Night Diff Hrs', 'Day Type', 'Rate', 'Pay'])];
 
   for (const emp of employees) {
     const entries = await prisma.timeEntry.findMany({
-      where: { employeeId: emp.id, status: 'APPROVED', clockOut: { not: null }, clockIn: { gte: new Date(from), lte: new Date(to) } },
+      where: { employeeId: emp.id, status: 'APPROVED', clockOut: { not: null }, clockIn: { gte: new Date(from), lte: endOfDayUTC(to) } },
       include: { breaks: true, shift: true },
     });
     const rateByRole = new Map(emp.jobRoles.map((r) => [r.roleName, r.hourlyRate]));
+    const allowanceByRole = new Map(emp.jobRoles.map((r) => [r.roleName, r.dailyAllowance]));
     const enriched = entries.map((e) => ({
       ...e,
       hourlyRate: rateByRole.get(e.roleName) ?? 0,
+      dailyAllowance: allowanceByRole.get(e.roleName) ?? 0,
       holiday: holidayByDay.get(new Date(e.clockIn).setHours(0, 0, 0, 0)) ?? null,
     }));
     const breakdown = computeWageBreakdown(enriched, config);
@@ -185,6 +188,21 @@ adminRouter.get('/export/csv', async (req, res) => {
           line.dayType,
           line.rate.toFixed(2),
           line.pay.toFixed(2),
+        ])
+      );
+    }
+    for (const line of breakdown.allowanceLines) {
+      rows.push(
+        toCsvRow([
+          `${emp.firstName} ${emp.lastName}`,
+          line.roleName,
+          new Date(line.date).toISOString().slice(0, 10),
+          '',
+          '',
+          '',
+          'ALLOWANCE',
+          line.amount.toFixed(2),
+          line.amount.toFixed(2),
         ])
       );
     }

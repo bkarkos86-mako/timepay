@@ -74,12 +74,17 @@ function dateKey(d) {
  */
 export function computeWageBreakdown(entries, config) {
   const byDay = new Map();
+  const byCalendarDay = new Map(); // day only, no role — for allowance below
 
   for (const entry of entries) {
     if (!entry.clockOut) continue; // still clocked in, not payable yet
     const key = `${dateKey(entry.clockIn)}|${entry.roleName}`;
     if (!byDay.has(key)) byDay.set(key, []);
     byDay.get(key).push(entry);
+
+    const dayOnly = dateKey(entry.clockIn);
+    if (!byCalendarDay.has(dayOnly)) byCalendarDay.set(dayOnly, []);
+    byCalendarDay.get(dayOnly).push(entry);
   }
 
   const result = {
@@ -91,7 +96,24 @@ export function computeWageBreakdown(entries, config) {
     restDayHours: 0,
     grossPay: 0,
     lines: [],
+    // Flat daily allowance — deliberately kept out of grossPay (see
+    // EmployeeJobRole.dailyAllowance). One per calendar day worked,
+    // regardless of how many entries/roles that day, using whichever role
+    // the day's earliest entry was worked under.
+    allowanceDays: 0,
+    allowancePay: 0,
+    allowanceLines: [],
   };
+
+  for (const [day, dayEntries] of byCalendarDay) {
+    const earliest = dayEntries.reduce((a, b) => (new Date(a.clockIn) < new Date(b.clockIn) ? a : b));
+    const amount = earliest.dailyAllowance ?? 0;
+    if (amount > 0) {
+      result.allowanceDays += 1;
+      result.allowancePay += amount;
+      result.allowanceLines.push({ date: day, roleName: earliest.roleName, amount });
+    }
+  }
 
   for (const [, dayEntries] of byDay) {
     let workedMinutesSoFar = 0;

@@ -69,7 +69,7 @@ export default function AdminDashboard() {
   const [selectedEmployee, setSelectedEmployee] = useState('');
   const [summary, setSummary] = useState(null);
 
-  const [newEmployee, setNewEmployee] = useState({ firstName: '', lastName: '', email: '', password: '', roleName: '', hourlyRate: '', hireDate: '' });
+  const [newEmployee, setNewEmployee] = useState({ firstName: '', lastName: '', email: '', password: '', roleName: '', hourlyRate: '', dailyAllowance: '', hireDate: '' });
   const [creatingEmployee, setCreatingEmployee] = useState(false);
 
   const [worksites, setWorksites] = useState([]);
@@ -238,9 +238,16 @@ export default function AdminDashboard() {
         email: newEmployee.email,
         password: newEmployee.password,
         hireDate: newEmployee.hireDate || undefined,
-        jobRoles: [{ roleName: newEmployee.roleName, hourlyRate: Number(newEmployee.hourlyRate), isDefault: true }],
+        jobRoles: [
+          {
+            roleName: newEmployee.roleName,
+            hourlyRate: Number(newEmployee.hourlyRate),
+            dailyAllowance: Number(newEmployee.dailyAllowance) || 0,
+            isDefault: true,
+          },
+        ],
       });
-      setNewEmployee({ firstName: '', lastName: '', email: '', password: '', roleName: '', hourlyRate: '', hireDate: '' });
+      setNewEmployee({ firstName: '', lastName: '', email: '', password: '', roleName: '', hourlyRate: '', dailyAllowance: '', hireDate: '' });
       load();
     } catch (err) {
       setError(err.message);
@@ -640,6 +647,10 @@ export default function AdminDashboard() {
               <div className="stat-label">Gross pay</div>
               <div className="stat-value">₱{summary.grossPay.toFixed(2)}</div>
             </div>
+            <div>
+              <div className="stat-label">Allowance ({summary.allowanceDays} day{summary.allowanceDays === 1 ? '' : 's'})</div>
+              <div className="stat-value">₱{summary.allowancePay.toFixed(2)}</div>
+            </div>
           </div>
         )}
       </div>
@@ -811,6 +822,17 @@ export default function AdminDashboard() {
                 <div className="field">
                   <label>Hourly rate (₱)</label>
                   <input type="number" step="0.01" required value={newEmployee.hourlyRate} onChange={(e) => setNewEmployee({ ...newEmployee, hourlyRate: e.target.value })} />
+                </div>
+                <div className="field">
+                  <label>Daily allowance (₱, optional)</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    placeholder="0.00"
+                    value={newEmployee.dailyAllowance}
+                    onChange={(e) => setNewEmployee({ ...newEmployee, dailyAllowance: e.target.value })}
+                  />
+                  <span className="muted">Flat amount paid once per day worked (e.g. meal/transport) — kept separate from wages.</span>
                 </div>
               </div>
               <button className="btn" type="submit" disabled={creatingEmployee}>

@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { prisma } from '../db.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
 import { logAudit } from '../lib/audit.js';
+import { endOfDayUTC } from '../lib/dateRange.js';
 
 export const leaveRouter = Router();
 leaveRouter.use(requireAuth);
@@ -143,7 +144,7 @@ leaveRouter.get('/calendar', async (req, res) => {
   const requests = await prisma.leaveRequest.findMany({
     where: {
       status: 'APPROVED',
-      startDate: { lte: to ? new Date(to) : undefined },
+      startDate: { lte: to ? endOfDayUTC(to) : undefined },
       endDate: { gte: from ? new Date(from) : undefined },
     },
     include: { leaveType: true, employee: { select: { firstName: true, lastName: true } } },
