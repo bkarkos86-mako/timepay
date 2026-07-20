@@ -51,6 +51,10 @@ export default function EmployeeProfile() {
   const [dateForm, setDateForm] = useState({ hireDate: '', regularizationDate: '' });
   const [savingDates, setSavingDates] = useState(false);
 
+  const [editingRoleId, setEditingRoleId] = useState(null);
+  const [roleForm, setRoleForm] = useState({ hourlyRate: '', dailyAllowance: '' });
+  const [savingRole, setSavingRole] = useState(false);
+
   const [reviewForm, setReviewForm] = useState({ rating: 'MEETS_EXPECTATIONS', notes: '', reviewDate: toInputDate(new Date().toISOString()) });
   const [submittingReview, setSubmittingReview] = useState(false);
 
@@ -85,6 +89,25 @@ export default function EmployeeProfile() {
       setError(err.message);
     } finally {
       setSavingDates(false);
+    }
+  }
+
+  function startEditRole(role) {
+    setEditingRoleId(role.id);
+    setRoleForm({ hourlyRate: role.hourlyRate, dailyAllowance: role.dailyAllowance });
+  }
+
+  async function saveRole(roleId) {
+    setSavingRole(true);
+    setError('');
+    try {
+      await api.patch(`/employees/${id}/job-roles/${roleId}`, roleForm);
+      setEditingRoleId(null);
+      load();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setSavingRole(false);
     }
   }
 
@@ -177,15 +200,56 @@ export default function EmployeeProfile() {
           <h3>Job roles</h3>
           <table>
             <tbody>
-              {employee.jobRoles?.map((r) => (
-                <tr key={r.id}>
-                  <td>
-                    {r.roleName} {r.isDefault && <span className="badge badge-closed">default</span>}
-                  </td>
-                  <td>₱{r.hourlyRate}/hr</td>
-                  <td className="muted">{r.dailyAllowance > 0 ? `₱${r.dailyAllowance}/day allowance` : ''}</td>
-                </tr>
-              ))}
+              {employee.jobRoles?.map((r) =>
+                editingRoleId === r.id ? (
+                  <tr key={r.id}>
+                    <td>
+                      {r.roleName} {r.isDefault && <span className="badge badge-closed">default</span>}
+                    </td>
+                    <td>
+                      <input
+                        type="number"
+                        step="0.01"
+                        style={{ width: '90px' }}
+                        value={roleForm.hourlyRate}
+                        onChange={(e) => setRoleForm({ ...roleForm, hourlyRate: e.target.value })}
+                      />
+                    </td>
+                    <td>
+                      <input
+                        type="number"
+                        step="0.01"
+                        style={{ width: '90px' }}
+                        value={roleForm.dailyAllowance}
+                        onChange={(e) => setRoleForm({ ...roleForm, dailyAllowance: e.target.value })}
+                      />
+                    </td>
+                    <td style={{ whiteSpace: 'nowrap' }}>
+                      <button className="btn" style={{ marginRight: '0.4rem' }} disabled={savingRole} onClick={() => saveRole(r.id)}>
+                        {savingRole ? 'Saving…' : 'Save'}
+                      </button>
+                      <button className="btn btn-secondary" disabled={savingRole} onClick={() => setEditingRoleId(null)}>
+                        Cancel
+                      </button>
+                    </td>
+                  </tr>
+                ) : (
+                  <tr key={r.id}>
+                    <td>
+                      {r.roleName} {r.isDefault && <span className="badge badge-closed">default</span>}
+                    </td>
+                    <td>₱{r.hourlyRate}/hr</td>
+                    <td className="muted">{r.dailyAllowance > 0 ? `₱${r.dailyAllowance}/day allowance` : ''}</td>
+                    {isAdmin && (
+                      <td>
+                        <button className="btn btn-secondary" onClick={() => startEditRole(r)}>
+                          Edit
+                        </button>
+                      </td>
+                    )}
+                  </tr>
+                )
+              )}
             </tbody>
           </table>
         </div>

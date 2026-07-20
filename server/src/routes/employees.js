@@ -126,6 +126,34 @@ employeesRouter.patch('/:id', requireRole('ADMIN'), async (req, res) => {
   res.json(publicEmployee(employee));
 });
 
+// ---------- Job roles (per-role hourly rate & daily allowance) ----------
+
+employeesRouter.patch('/:id/job-roles/:roleId', requireRole('ADMIN'), async (req, res) => {
+  const { hourlyRate, dailyAllowance } = req.body;
+
+  const role = await prisma.employeeJobRole.findUnique({ where: { id: req.params.roleId } });
+  if (!role || role.employeeId !== req.params.id) return res.status(404).json({ error: 'Not found' });
+
+  const updated = await prisma.employeeJobRole.update({
+    where: { id: role.id },
+    data: {
+      hourlyRate: hourlyRate !== undefined && hourlyRate !== '' ? Number(hourlyRate) : undefined,
+      dailyAllowance: dailyAllowance !== undefined && dailyAllowance !== '' ? Number(dailyAllowance) : undefined,
+    },
+  });
+
+  await logAudit({
+    entityType: 'EmployeeJobRole',
+    entityId: role.id,
+    changedById: req.user.sub,
+    changeDescription: `Updated ${role.roleName} pay for employee ${role.employeeId}`,
+    oldValue: { hourlyRate: role.hourlyRate, dailyAllowance: role.dailyAllowance },
+    newValue: { hourlyRate: updated.hourlyRate, dailyAllowance: updated.dailyAllowance },
+  });
+
+  res.json(updated);
+});
+
 // ---------- Performance reviews ----------
 
 employeesRouter.get('/:id/performance-reviews', async (req, res) => {
