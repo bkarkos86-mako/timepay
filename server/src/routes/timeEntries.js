@@ -4,13 +4,10 @@ import { requireAuth, requireRole } from '../middleware/auth.js';
 import { uploadPhoto } from '../middleware/upload.js';
 import { logAudit } from '../lib/audit.js';
 import { checkGeofence, recordGeofenceCheck } from '../lib/geofenceIncidents.js';
+import { savePhoto } from '../lib/storage.js';
 
 export const timeEntriesRouter = Router();
 timeEntriesRouter.use(requireAuth);
-
-function photoUrl(file) {
-  return file ? `/uploads/${file.filename}` : null;
-}
 
 // Find the employee's shift for the calendar day a timestamp falls on. A day
 // can have more than one shift (a split shift, e.g. 9-1 then 4-8) — in that
@@ -66,6 +63,7 @@ timeEntriesRouter.post('/clock-in', uploadPhoto.single('photo'), async (req, res
   }
 
   const geofence = await checkGeofence(lat, lng);
+  const clockInPhotoUrl = await savePhoto(req.file);
 
   const entry = await prisma.timeEntry.create({
     data: {
@@ -75,7 +73,7 @@ timeEntriesRouter.post('/clock-in', uploadPhoto.single('photo'), async (req, res
       type: 'CLOCK',
       status: 'APPROVED',
       clockIn: now,
-      clockInPhotoUrl: photoUrl(req.file),
+      clockInPhotoUrl,
       clockInLat: lat ? Number(lat) : null,
       clockInLng: lng ? Number(lng) : null,
       isLate,
@@ -112,12 +110,13 @@ timeEntriesRouter.post('/:id/clock-out', uploadPhoto.single('photo'), async (req
   }
 
   const geofence = await checkGeofence(lat, lng);
+  const clockOutPhotoUrl = await savePhoto(req.file);
 
   const updated = await prisma.timeEntry.update({
     where: { id: entry.id },
     data: {
       clockOut: now,
-      clockOutPhotoUrl: photoUrl(req.file),
+      clockOutPhotoUrl,
       clockOutLat: lat ? Number(lat) : null,
       clockOutLng: lng ? Number(lng) : null,
       isUndertime,
@@ -187,9 +186,10 @@ timeEntriesRouter.post('/:id/geofence-incidents/:incidentId/verify', uploadPhoto
   if (incident.employeeId !== req.user.sub) return res.status(403).json({ error: 'Not your incident' });
   if (incident.resolvedAt) return res.status(400).json({ error: 'Already resolved' });
 
+  const verificationPhotoUrl = await savePhoto(req.file);
   const updated = await prisma.geofenceIncident.update({
     where: { id: incident.id },
-    data: { resolvedAt: new Date(), resolution: 'PHOTO_VERIFIED', verificationPhotoUrl: photoUrl(req.file) },
+    data: { resolvedAt: new Date(), resolution: 'PHOTO_VERIFIED', verificationPhotoUrl },
   });
 
   await logAudit({

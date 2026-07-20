@@ -1,14 +1,4 @@
 import multer from 'multer';
-import path from 'node:path';
-import crypto from 'node:crypto';
-
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => cb(null, path.join(process.cwd(), 'uploads')),
-  filename: (req, file, cb) => {
-    const ext = path.extname(file.originalname) || '.jpg';
-    cb(null, `${crypto.randomUUID()}${ext}`);
-  },
-});
 
 function imageFileFilter(req, file, cb) {
   if (!file.mimetype.startsWith('image/')) {
@@ -17,8 +7,11 @@ function imageFileFilter(req, file, cb) {
   cb(null, true);
 }
 
+// Buffers in memory rather than writing to disk directly — lib/storage.js
+// decides where the buffer actually ends up (Supabase Storage in production,
+// local uploads/ folder in dev).
 export const uploadPhoto = multer({
-  storage,
+  storage: multer.memoryStorage(),
   fileFilter: imageFileFilter,
   limits: { fileSize: 5 * 1024 * 1024 },
 });

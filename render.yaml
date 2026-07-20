@@ -5,8 +5,11 @@
 # Deploy: Render dashboard -> New -> Blueprint -> connect this repo.
 # You'll be prompted to fill in every env var below marked sync:false —
 # see server/.env.example for what each one means. DATABASE_URL should be a
-# Postgres connection string (e.g. from Neon's free tier), not the local
-# SQLite file used in dev.
+# Postgres connection string from a free Supabase project (Settings ->
+# Database), not the local SQLite file used in dev. The SUPABASE_* vars are
+# for Storage (clock-in/out photos) from the same project (Storage -> create
+# a bucket -> Settings -> API for the URL/service_role key) — one Supabase
+# account covers both the database and photo storage.
 #
 # The build step uses `prisma db push` (not `migrate deploy`) against
 # server/prisma-production/schema.prisma — this lets the very first deploy
@@ -47,3 +50,9 @@ services:
         sync: false
       - key: VAPID_SUBJECT
         sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: SUPABASE_BUCKET
+        value: timepay-uploads
