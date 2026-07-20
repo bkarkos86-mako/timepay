@@ -24,7 +24,7 @@ export default function Layout() {
           </NavLink>
           <NavLink to="/leave">Leave</NavLink>
           {isManager && <NavLink to="/admin">Admin</NavLink>}
-          {isManager && <NavLink to="/schedule">Schedule</NavLink>}
+          <NavLink to="/schedule">Schedule</NavLink>
         </nav>
         <div className="topbar-actions">
           <span className="muted">{employee?.firstName} {employee?.lastName}</span>

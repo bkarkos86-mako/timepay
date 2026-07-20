@@ -48,9 +48,10 @@ adminRouter.post('/pay-periods/:id/export', requireRole('ADMIN'), async (req, re
 
 adminRouter.get('/dashboard', async (req, res) => {
   const todayStart = new Date(new Date().setHours(0, 0, 0, 0));
-  const [activeCount, lateToday, pendingTimeEntries, pendingLeave, outsideGeofenceToday, openIncidents] = await Promise.all([
+  const [activeCount, lateToday, tardyToday, pendingTimeEntries, pendingLeave, outsideGeofenceToday, openIncidents] = await Promise.all([
     prisma.timeEntry.count({ where: { clockOut: null, status: { in: ['APPROVED', 'PENDING'] } } }),
     prisma.timeEntry.count({ where: { isLate: true, clockIn: { gte: todayStart } } }),
+    prisma.timeEntry.count({ where: { isTardy: true, clockIn: { gte: todayStart } } }),
     prisma.timeEntry.count({ where: { status: 'PENDING' } }),
     prisma.leaveRequest.count({ where: { status: 'PENDING' } }),
     prisma.timeEntry.count({
@@ -58,7 +59,7 @@ adminRouter.get('/dashboard', async (req, res) => {
     }),
     prisma.geofenceIncident.count({ where: { resolvedAt: null } }),
   ]);
-  res.json({ activeCount, lateToday, pendingTimeEntries, pendingLeave, outsideGeofenceToday, openIncidents });
+  res.json({ activeCount, lateToday, tardyToday, pendingTimeEntries, pendingLeave, outsideGeofenceToday, openIncidents });
 });
 
 // ---------- Geofence incidents (left area while clocked in) ----------

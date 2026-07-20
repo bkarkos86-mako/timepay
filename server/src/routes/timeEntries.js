@@ -12,19 +12,33 @@ function photoUrl(file) {
   return file ? `/uploads/${file.filename}` : null;
 }
 
-// Find the employee's shift for the calendar day a timestamp falls on.
+// Find the employee's shift for the calendar day a timestamp falls on. A day
+// can have more than one shift (a split shift, e.g. 9-1 then 4-8) — in that
+// case pick whichever block's scheduled start is closest to the actual
+// clock-in time, not just whichever row happens to come back first.
 async function findShiftForDay(employeeId, timestamp) {
   const dayStart = new Date(timestamp);
   dayStart.setHours(0, 0, 0, 0);
   const dayEnd = new Date(dayStart);
   dayEnd.setDate(dayEnd.getDate() + 1);
 
-  return prisma.shift.findFirst({
+  const shifts = await prisma.shift.findMany({
     where: { employeeId, date: { gte: dayStart, lt: dayEnd } },
   });
+  if (shifts.length === 0) return null;
+  if (shifts.length === 1) return shifts[0];
+
+  const now = new Date(timestamp).getTime();
+  return shifts.reduce((closest, s) =>
+    Math.abs(new Date(s.scheduledStart).getTime() - now) < Math.abs(new Date(closest.scheduledStart).getTime() - now) ? s : closest
+  );
 }
 
 const GRACE_MINUTES = 5;
+// 15+ min late is a formal "tardy" occurrence (tallied for performance
+// reviews), distinct from the 5-min grace period used for day-to-day
+// lateness tracking above. Every tardy is also late, but not every late is tardy.
+const TARDY_THRESHOLD_MINUTES = 15;
 
 // ---------- Clock in/out ----------
 
@@ -41,11 +55,13 @@ timeEntriesRouter.post('/clock-in', uploadPhoto.single('photo'), async (req, res
 
   let isLate = false;
   let lateMinutes = 0;
+  let isTardy = false;
   if (shift) {
     const diffMin = Math.round((now - new Date(shift.scheduledStart)) / 60000);
     if (diffMin > GRACE_MINUTES) {
       isLate = true;
       lateMinutes = diffMin;
+      isTardy = diffMin > TARDY_THRESHOLD_MINUTES;
     }
   }
 
@@ -64,6 +80,7 @@ timeEntriesRouter.post('/clock-in', uploadPhoto.single('photo'), async (req, res
       clockInLng: lng ? Number(lng) : null,
       isLate,
       lateMinutes,
+      isTardy,
       clockInDistanceMeters: geofence.distanceMeters,
       clockInOutsideGeofence: geofence.outsideGeofence,
     },

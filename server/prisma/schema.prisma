@@ -23,6 +23,11 @@ model Employee {
   systemRole       String   @default("EMPLOYEE") // EMPLOYEE | MANAGER | ADMIN
   employmentStatus String   @default("ACTIVE") // ACTIVE | INACTIVE | TERMINATED
   hireDate         DateTime @default(now())
+  // Philippine labor law: probationary employees become regular after 6
+  // months of continuous service (Labor Code Art. 296). Auto-set to
+  // hireDate + 6 months when the employee is created; kept editable since
+  // real cases (leave without pay, early regularization, etc.) can shift it.
+  regularizationDate DateTime?
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 
@@ -40,8 +45,28 @@ model Employee {
   resolvedGeofenceIncidents GeofenceIncident[] @relation("IncidentResolvedBy")
   pushSubscriptions PushSubscription[]
   pingChallenges PingChallenge[]
+  performanceReviews         PerformanceReview[] @relation("ReviewSubject")
+  performanceReviewsGiven    PerformanceReview[] @relation("ReviewedBy")
+  shiftChangeRequests         ShiftChangeRequest[] @relation("ShiftChangeEmployee")
+  decidedShiftChangeRequests  ShiftChangeRequest[] @relation("ShiftChangeApprover")
 
   @@map("employees")
+}
+
+model PerformanceReview {
+  id           String   @id @default(cuid())
+  employeeId   String
+  reviewedById String
+  reviewDate   DateTime @default(now())
+  rating       String // EXCEEDS_EXPECTATIONS | MEETS_EXPECTATIONS | NEEDS_IMPROVEMENT | UNSATISFACTORY
+  notes        String
+  createdAt    DateTime @default(now())
+
+  employee   Employee @relation("ReviewSubject", fields: [employeeId], references: [id], onDelete: Cascade)
+  reviewedBy Employee @relation("ReviewedBy", fields: [reviewedById], references: [id])
+
+  @@index([employeeId])
+  @@map("performance_reviews")
 }
 
 // WebAuthn/passkey credentials, enrolled per-device, used as a faster
@@ -111,9 +136,34 @@ model Shift {
 
   employee   Employee    @relation(fields: [employeeId], references: [id], onDelete: Cascade)
   timeEntries TimeEntry[]
+  changeRequests ShiftChangeRequest[]
 
   @@index([employeeId, date])
   @@map("shifts")
+}
+
+// An employee flagging a date and asking for their schedule to change —
+// doesn't auto-modify anything, mirrors LeaveRequest's review workflow: the
+// employee explains what they need, a manager reviews and manually adjusts
+// the shift (or not) via the normal scheduling tools, then resolves this.
+model ShiftChangeRequest {
+  id           String    @id @default(cuid())
+  employeeId   String
+  shiftId      String? // the specific shift being referenced, if one exists that day
+  date         DateTime // calendar date in question
+  reason       String
+  status       String    @default("PENDING") // PENDING | APPROVED | DENIED
+  approverId   String?
+  decidedAt    DateTime?
+  decisionNote String?
+  createdAt    DateTime  @default(now())
+
+  employee Employee  @relation("ShiftChangeEmployee", fields: [employeeId], references: [id], onDelete: Cascade)
+  approver Employee? @relation("ShiftChangeApprover", fields: [approverId], references: [id])
+  shift    Shift?    @relation(fields: [shiftId], references: [id], onDelete: SetNull)
+
+  @@index([employeeId, date])
+  @@map("shift_change_requests")
 }
 
 // ---------- Time entries ----------
@@ -141,6 +191,10 @@ model TimeEntry {
 
   isLate          Boolean @default(false)
   lateMinutes     Int     @default(0)
+  // A stricter subset of isLate (15+ min vs the 5-min grace period) — this is
+  // the threshold that counts as a formal tardy occurrence for performance
+  // review purposes, not just day-to-day lateness tracking.
+  isTardy         Boolean @default(false)
   isUndertime     Boolean @default(false)
   undertimeMinutes Int    @default(0)
 

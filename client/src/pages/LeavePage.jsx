@@ -128,6 +128,7 @@ export default function LeavePage() {
                   <td>{r.reason}</td>
                   <td>
                     <span className={`badge badge-${r.status.toLowerCase()}`}>{r.status}</span>
+                    {r.status === 'DENIED' && r.decisionNote && <div className="muted" style={{ marginTop: '0.25rem' }}>{r.decisionNote}</div>}
                   </td>
                 </tr>
               ))}

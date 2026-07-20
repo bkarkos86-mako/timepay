@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback } from 'react';
+import { Link } from 'react-router-dom';
 import { api } from '../api/client';
 import { useAuth } from '../context/AuthContext';
 import WorksiteLocationPicker from '../components/WorksiteLocationPicker';
@@ -11,7 +12,10 @@ function fmtDate(iso) {
   return iso ? new Date(iso).toLocaleDateString() : '—';
 }
 function toInputDate(d) {
-  return d.toISOString().slice(0, 10);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
 }
 function mapUrl(lat, lng) {
   return `https://www.google.com/maps?q=${lat},${lng}`;
@@ -65,7 +69,7 @@ export default function AdminDashboard() {
   const [selectedEmployee, setSelectedEmployee] = useState('');
   const [summary, setSummary] = useState(null);
 
-  const [newEmployee, setNewEmployee] = useState({ firstName: '', lastName: '', email: '', password: '', roleName: '', hourlyRate: '' });
+  const [newEmployee, setNewEmployee] = useState({ firstName: '', lastName: '', email: '', password: '', roleName: '', hourlyRate: '', hireDate: '' });
   const [creatingEmployee, setCreatingEmployee] = useState(false);
 
   const [worksites, setWorksites] = useState([]);
@@ -77,6 +81,7 @@ export default function AdminDashboard() {
   const [pingChallenges, setPingChallenges] = useState([]);
   const [longRunningShifts, setLongRunningShifts] = useState([]);
   const [reasonModal, setReasonModal] = useState(null); // { title, confirmLabel, onConfirm(reason) }
+  const [showArchived, setShowArchived] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -232,9 +237,10 @@ export default function AdminDashboard() {
         lastName: newEmployee.lastName,
         email: newEmployee.email,
         password: newEmployee.password,
+        hireDate: newEmployee.hireDate || undefined,
         jobRoles: [{ roleName: newEmployee.roleName, hourlyRate: Number(newEmployee.hourlyRate), isDefault: true }],
       });
-      setNewEmployee({ firstName: '', lastName: '', email: '', password: '', roleName: '', hourlyRate: '' });
+      setNewEmployee({ firstName: '', lastName: '', email: '', password: '', roleName: '', hourlyRate: '', hireDate: '' });
       load();
     } catch (err) {
       setError(err.message);
@@ -297,6 +303,10 @@ export default function AdminDashboard() {
           <div className="stat-value">{stats?.lateToday ?? '—'}</div>
         </div>
         <div className="card">
+          <div className="stat-label">Tardy today (15m+)</div>
+          <div className="stat-value">{stats?.tardyToday ?? '—'}</div>
+        </div>
+        <div className="card">
           <div className="stat-label">Pending time entries</div>
           <div className="stat-value">{stats?.pendingTimeEntries ?? '—'}</div>
         </div>
@@ -328,7 +338,10 @@ export default function AdminDashboard() {
                     <td>
                       <LocationStatus lat={e.clockInLat} lng={e.clockInLng} distanceMeters={e.clockInDistanceMeters} outsideGeofence={e.clockInOutsideGeofence} />
                     </td>
-                    <td style={{ whiteSpace: 'nowrap' }}>{e.isLate && <span className="badge badge-pending">Late</span>}</td>
+                    <td style={{ whiteSpace: 'nowrap' }}>
+                      {e.isTardy && <span className="badge badge-denied">Tardy</span>}
+                      {e.isLate && !e.isTardy && <span className="badge badge-pending">Late</span>}
+                    </td>
                     <td>
                       <button className="btn btn-danger" onClick={() => forceClockOut(e.id)}>
                         Clock out
@@ -402,7 +415,8 @@ export default function AdminDashboard() {
                     <LocationStatus lat={e.clockOutLat} lng={e.clockOutLng} distanceMeters={e.clockOutDistanceMeters} outsideGeofence={e.clockOutOutsideGeofence} />
                   </td>
                   <td style={{ whiteSpace: 'nowrap' }}>
-                    {e.isLate && <span className="badge badge-pending">Late {e.lateMinutes}m</span>}{' '}
+                    {e.isTardy && <span className="badge badge-denied">Tardy {e.lateMinutes}m</span>}{' '}
+                    {e.isLate && !e.isTardy && <span className="badge badge-pending">Late {e.lateMinutes}m</span>}{' '}
                     {e.isUndertime && <span className="badge badge-pending">Undertime {e.undertimeMinutes}m</span>}
                   </td>
                 </tr>
@@ -721,33 +735,50 @@ export default function AdminDashboard() {
         )}
       </div>
 
-      <div className={isAdmin ? 'grid grid-cols-2 section' : 'grid section'}>
-        <div className="card">
-          <h3>Employees</h3>
-          <div className="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Name</th>
-                  <th>Role(s)</th>
-                  <th>Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                {employees.map((e) => (
-                  <tr key={e.id}>
-                    <td>{e.firstName} {e.lastName}<div className="muted">{e.email}</div></td>
-                    <td>{e.jobRoles?.map((r) => r.roleName).join(', ')}</td>
-                    <td>{e.employmentStatus}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+      <div className="section">
+        <h2>Employees</h2>
+        <div className="grid grid-cols-3">
+          {employees
+            .filter((e) => e.employmentStatus === 'ACTIVE')
+            .map((e) => (
+              <Link key={e.id} to={`/admin/employees/${e.id}`} className="card" style={{ display: 'block', textDecoration: 'none', color: 'inherit' }}>
+                <h3 style={{ marginBottom: '0.2rem' }}>{e.firstName} {e.lastName}</h3>
+                <p className="muted" style={{ marginBottom: '0.5rem' }}>{e.email}</p>
+                <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
+                  <span className="badge badge-closed">{e.jobRoles?.map((r) => r.roleName).join(', ') || 'No role'}</span>
+                  <span className="badge badge-approved">{e.employmentStatus}</span>
+                </div>
+              </Link>
+            ))}
+          {employees.filter((e) => e.employmentStatus === 'ACTIVE').length === 0 && <p className="muted">No active employees.</p>}
         </div>
 
+        {employees.some((e) => e.employmentStatus !== 'ACTIVE') && (
+          <>
+            <button className="btn btn-secondary" style={{ marginTop: '1rem' }} onClick={() => setShowArchived((s) => !s)}>
+              {showArchived ? 'Hide' : 'Show'} archived ({employees.filter((e) => e.employmentStatus !== 'ACTIVE').length})
+            </button>
+            {showArchived && (
+              <div className="grid grid-cols-3" style={{ marginTop: '1rem' }}>
+                {employees
+                  .filter((e) => e.employmentStatus !== 'ACTIVE')
+                  .map((e) => (
+                    <Link key={e.id} to={`/admin/employees/${e.id}`} className="card" style={{ display: 'block', textDecoration: 'none', color: 'inherit', opacity: 0.75 }}>
+                      <h3 style={{ marginBottom: '0.2rem' }}>{e.firstName} {e.lastName}</h3>
+                      <p className="muted" style={{ marginBottom: '0.5rem' }}>{e.email}</p>
+                      <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
+                        <span className="badge badge-closed">{e.jobRoles?.map((r) => r.roleName).join(', ') || 'No role'}</span>
+                        <span className="badge badge-denied">{e.employmentStatus}</span>
+                      </div>
+                    </Link>
+                  ))}
+              </div>
+            )}
+          </>
+        )}
+
         {isAdmin && (
-          <div className="card">
+          <div className="card" style={{ marginTop: '1.5rem' }}>
             <h3>Add employee</h3>
             <form onSubmit={createEmployee}>
               <div className="grid grid-cols-2">
@@ -767,6 +798,10 @@ export default function AdminDashboard() {
               <div className="field">
                 <label>Temporary password</label>
                 <input type="text" required value={newEmployee.password} onChange={(e) => setNewEmployee({ ...newEmployee, password: e.target.value })} />
+              </div>
+              <div className="field">
+                <label>Hire date (optional — defaults to today)</label>
+                <input type="date" value={newEmployee.hireDate} onChange={(e) => setNewEmployee({ ...newEmployee, hireDate: e.target.value })} />
               </div>
               <div className="grid grid-cols-2">
                 <div className="field">

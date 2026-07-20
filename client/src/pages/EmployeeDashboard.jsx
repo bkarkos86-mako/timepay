@@ -246,7 +246,8 @@ export default function EmployeeDashboard() {
             <div>
               <p>
                 Clocked in at <strong>{fmtTime(openEntry.clockIn)}</strong> as {openEntry.roleName}
-                {openEntry.isLate && <span className="badge badge-pending" style={{ marginLeft: '0.4rem' }}>Late {openEntry.lateMinutes}m</span>}
+                {openEntry.isTardy && <span className="badge badge-denied" style={{ marginLeft: '0.4rem' }}>Tardy {openEntry.lateMinutes}m</span>}
+                {openEntry.isLate && !openEntry.isTardy && <span className="badge badge-pending" style={{ marginLeft: '0.4rem' }}>Late {openEntry.lateMinutes}m</span>}
               </p>
               <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.6rem' }}>
                 <button className="btn btn-secondary" onClick={() => toggleBreak('BREAK')}>

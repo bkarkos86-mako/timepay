@@ -6,6 +6,7 @@ import Login from './pages/Login';
 import EmployeeDashboard from './pages/EmployeeDashboard';
 import LeavePage from './pages/LeavePage';
 import AdminDashboard from './pages/AdminDashboard';
+import EmployeeProfile from './pages/EmployeeProfile';
 import SchedulePage from './pages/SchedulePage';
 import PingChallengeResponder from './components/PingChallengeResponder';
 
@@ -44,13 +45,14 @@ function AppRoutes() {
           }
         />
         <Route
-          path="/schedule"
+          path="/admin/employees/:id"
           element={
             <RequireManager>
-              <SchedulePage />
+              <EmployeeProfile />
             </RequireManager>
           }
         />
+        <Route path="/schedule" element={<SchedulePage />} />
       </Route>
     </Routes>
   );
